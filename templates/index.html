@@ -118,9 +118,7 @@
             document.getElementById('userFileName').textContent = e.target.files[0]?.name || '';
         });
 
-        document.getElementById('referenceFile').addEventListener('change', function (e) {
-            document.getElementById('referenceFileName').textContent = e.target.files[0]?.name || '';
-        });
+
 
         // Initialize the page
         document.addEventListener('DOMContentLoaded', function () {
@@ -358,6 +356,10 @@
                     questionList.innerHTML = `<div class="error-message">Error loading questions</div>`;
                 }
             });
+        });
+
+        document.getElementById('referenceFile').addEventListener('change', function (e) {
+            document.getElementById('referenceFileName').textContent = e.target.files[0]?.name || '';
         });
     </script>
 </body>
