@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, render_template
 import mysql.connector
 from dotenv import load_dotenv
 import os
+import json
 load_dotenv()
 
 
@@ -11,7 +12,7 @@ app = Flask(__name__)
 db_config = {
     "host": os.getenv('DBHOST'),
     "user": os.getenv('DBUSER'),
-    "password": os.getenv('DBPASS')
+    "password": os.getenv('DBPASS'),
     "database": os.getenv('DBNAME')
 }
 
