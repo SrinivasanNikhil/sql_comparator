@@ -1,0 +1,12 @@
+{
+	"1": "List the names of all employees who work in the 'Sales' department.",
+	"2": "Show all products that are in the 'Classic Cars' product line.",
+	"3": "Find all customers based in 'USA'.",
+	"4": "Retrieve all orders placed by the customer with the customer number 103.",
+	"5": "List all products with a buy price greater than 100.",
+	"6": "Show all orders with a status of 'On Hold'.",
+	"7": "Find employees whose last name starts with the letter 'B'.",
+	"8": "Retrieve all customers whose credit limit is less than 50000.",
+	"9": "List all offices located in 'Asia'.",
+	"10": "Show all products with a quantity in stock of less than 500."
+}

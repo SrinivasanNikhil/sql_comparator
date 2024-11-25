@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="static/css/styles.css">
+    <title>SQL Query Comparator</title>
+    <style>
+
+    </style>
+</head>
+
+<body>
+    <div class="drawer">
+        <div class="drawer-header">
+            <select id="questionSetSelect" class="question-set-select">
+                <option value="">Select Question Set</option>
+                {% for file in questionFiles %}
+                <option value="{{ file }}">{{ file }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="drawer-content">
+            <div id="questionList" class="question-list"></div>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="container">
+            <h1>SQL Query Comparator</h1>
+
+            <div class="tabs">
+                <div class="tab active" onclick="switchTab('individual')">Individual Query</div>
+                <div class="tab" onclick="switchTab('file')">File Comparison</div>
+            </div>
+
+            <div id="individual-comparison" class="tab-content active comparison-mode">
+                <div class="query-section">
+                    <div class="input-group">
+                        <label for="fileSelect">Select File</label>
+                        <select id="fileSelect" name="selected_file" onchange="updateQueries()">
+                            {% for file in fileList %}
+                            <option value="{{ file }}">{{ file }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="querySelect">Reference Query</label>
+                        <select id="querySelect">
+                            {% for display_text, query in queryList %}
+                            <option value="{{ query }}">{{ display_text }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="user-query">Your Query</label>
+                    <textarea id="user-query" placeholder="Enter your SQL query here"></textarea>
+                </div>
+
+                <button onclick="submitQuery()">Compare Query</button>
+            </div>
+
+            <div id="file-comparison" class="tab-content comparison-mode">
+                <div class="file-upload">
+                    <div class="input-group">
+                        <label>User Solution File</label>
+                        <input type="file" id="userFile" class="file-input" accept=".json">
+                        <label for="userFile" class="file-label">Choose User File</label>
+                        <span id="userFileName" class="file-name"></span>
+                    </div>
+
+                    <div class="input-group">
+                        <label>Reference Solution File</label>
+                        <select id="referenceFileSelect" class="file-select">
+                            <option value="">Select Reference File</option>
+                            {% for file in fileList %}
+                            <option value="{{ file }}">{{ file }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <button onclick="compareFiles()">Compare Files</button>
+            </div>
+
+
+            <div id="results" class="results"></div>
+        </div>
+    </div>
+
+
+
+    <script>
+
+        function switchTab(tabName) {
+            // Update tab styling
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelector(`.tab[onclick*="${tabName}"]`).classList.add('active');
+
+            // Update content visibility
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(`${tabName}-comparison`).classList.add('active');
+
+            // Clear results when switching tabs
+            document.getElementById('results').innerHTML = '';
+        }
+
+        // File input handlers
+        document.getElementById('userFile').addEventListener('change', function (e) {
+            document.getElementById('userFileName').textContent = e.target.files[0]?.name || '';
+        });
+
+        document.getElementById('referenceFile').addEventListener('change', function (e) {
+            document.getElementById('referenceFileName').textContent = e.target.files[0]?.name || '';
+        });
+
+        // Initialize the page
+        document.addEventListener('DOMContentLoaded', function () {
+            if (document.getElementById('fileSelect').value) {
+                updateQueries();
+            }
+        });
+
+        async function submitQuery() {
+            const userQuery = document.getElementById('user-query').value;
+            const referenceQuery = document.getElementById('querySelect').value;
+
+            const response = await fetch('/compare', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    query: userQuery,
+                    reference_query: referenceQuery
+                })
+            });
+
+            const result = await response.json();
+            let resultHTML = `
+        <h3>Comparison Results</h3>
+        
+        <div class="query-analysis">
+            <h4>Query Analysis</h4>
+            <p>
+                <strong>Exact Match:</strong> 
+                <span class="status-badge ${result.query_analysis.exact_match ? 'status-match' : 'status-mismatch'}">
+                    ${result.query_analysis.exact_match ? 'Yes' : 'No'}
+                </span>
+            </p>
+    `;
+
+            if (result.query_analysis.missing_terms.length > 0) {
+                resultHTML += `
+            <p><strong>Missing Terms:</strong></p>
+            <ul>
+                ${result.query_analysis.missing_terms.map(term => `<li>${term}</li>`).join('')}
+            </ul>
+        `;
+            }
+
+            if (result.query_analysis.additional_terms.length > 0) {
+                resultHTML += `
+            <p><strong>Additional Terms:</strong></p>
+            <ul>
+                ${result.query_analysis.additional_terms.map(term => `<li>${term}</li>`).join('')}
+            </ul>
+        `;
+            }
+
+            resultHTML += `</div>`;
+
+            if (result.result_comparison) {
+                resultHTML += `
+            <div class="query-analysis">
+                <h4>Results Comparison</h4>
+                <p>
+                    <strong>Structure Match:</strong> 
+                    <span class="status-badge ${result.result_comparison.structure_match ? 'status-match' : 'status-mismatch'}">
+                        ${result.result_comparison.structure_match ? 'Yes' : 'No'}
+                    </span>
+                </p>
+                <p><strong>Record Counts:</strong></p>
+                <ul>
+                    <li>User Query: ${result.result_comparison.record_counts.user} records</li>
+                    <li>Reference Query: ${result.result_comparison.record_counts.reference} records</li>
+                </ul>
+                <p>
+                    <strong>Exact Match:</strong>
+                    <span class="status-badge ${result.result_comparison.exact_match ? 'status-match' : 'status-mismatch'}">
+                        ${result.result_comparison.exact_match ? 'Yes' : 'No'}
+                    </span>
+                </p>
+            </div>
+        `;
+            }
+
+            if (result.error) {
+                resultHTML += `
+            <div class="error-message">
+                <strong>Error:</strong> ${result.error}
+            </div>
+        `;
+            }
+
+            document.getElementById('results').innerHTML = resultHTML;
+        }
+
+
+        function updateQueries() {
+            const fileSelect = document.getElementById('fileSelect');
+            const querySelect = document.getElementById('querySelect');
+
+            const formData = new FormData();
+            formData.append('filename', fileSelect.value);
+
+            fetch('/get_queries', {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => response.json())
+                .then(data => {
+                    querySelect.innerHTML = '';
+                    data.queries.forEach(query => {
+                        const option = document.createElement('option');
+                        option.value = query.query;
+                        option.textContent = query.display;
+                        querySelect.appendChild(option);
+                    });
+                })
+                .catch(error => console.error('Error:', error));
+        }
+
+
+        async function compareFiles() {
+            const userFile = document.getElementById('userFile').files[0];
+            const referenceFile = document.getElementById('referenceFileSelect').value;
+
+            if (!userFile || !referenceFile) {
+                alert('Please select both files');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('userFile', userFile);
+            formData.append('referenceFile', referenceFile);
+
+            try {
+                const response = await fetch('/compare_files', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.error) {
+                    document.getElementById('results').innerHTML = `
+                <div class="error-message">
+                    Error: ${result.error}
+                </div>
+            `;
+                    return;
+                }
+
+                displayResults(result.comparisons);
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('results').innerHTML = `
+            <div class="error-message">
+                Error comparing files: ${error.message}
+            </div>
+        `;
+            }
+        }
+
+        // Update file name display for user file
+        document.getElementById('userFile').addEventListener('change', function (e) {
+            document.getElementById('userFileName').textContent = e.target.files[0]?.name || '';
+        });
+
+
+        document.addEventListener('DOMContentLoaded', function () {
+            if (document.getElementById('fileSelect').value) {
+                updateQueries();
+            }
+        });
+
+        document.getElementById("questionSetSelect").addEventListener('click', function () {
+            alert("Clicked");
+        });
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const questionSetSelect = document.getElementById('questionSetSelect');
+            const questionList = document.getElementById('questionList');
+
+
+            // Add console log to verify event listener
+            console.log('Adding change listener to:', questionSetSelect);
+
+            questionSetSelect.addEventListener('change', async function () {
+                console.log('Question set changed to:', this.value);
+
+                if (!this.value) {
+                    questionList.innerHTML = '';
+                    return;
+                }
+
+                // Show loading state
+                questionList.innerHTML = '<div class="loading">Loading questions...</div>';
+
+                try {
+                    const formData = new FormData();
+                    formData.append('filename', this.value);
+
+                    const response = await fetch('/get_questions', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const data = await response.json();
+                    console.log('Received data:', data);
+
+                    if (data.error) {
+                        questionList.innerHTML = `<div class="error-message">${data.error}</div>`;
+                        return;
+                    }
+
+                    if (data.questions) {
+                        const questionsHtml = Object.entries(data.questions)
+                            .map(([number, text]) => `
+                                <div class="question-item" data-number="${number}">
+                                    <span class="question-number">Q${number}:</span>
+                                    <span class="question-text">${text}</span>
+                                </div>
+                            `).join('');
+
+                        questionList.innerHTML = questionsHtml;
+
+                        // Add click handlers
+                        document.querySelectorAll('.question-item').forEach(item => {
+                            item.addEventListener('click', function () {
+                                document.querySelectorAll('.question-item')
+                                    .forEach(i => i.classList.remove('active'));
+                                this.classList.add('active');
+                            });
+                        });
+                    } else {
+                        questionList.innerHTML = '<div class="error-message">No questions found</div>';
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    questionList.innerHTML = `<div class="error-message">Error loading questions</div>`;
+                }
+            });
+        });
+    </script>
+</body>
+
+</html>
