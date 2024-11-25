@@ -7,8 +7,6 @@ load_dotenv()
 
 app = Flask(__name__)
 
-
-
 # MySQL Database connection
 db_config = {
     "host": os.getenv('DBHOST'),

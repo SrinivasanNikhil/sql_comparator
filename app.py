@@ -181,7 +181,7 @@ def compare():
     comparison = compare_individual_queries(user_query, reference_query)
     
     return jsonify(comparison)
-
+  
 @app.route('/get_questions', methods=['POST'])
 def get_questions():
     filename = request.form.get('filename')
