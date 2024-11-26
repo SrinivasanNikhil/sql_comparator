@@ -1,9 +1,15 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, session
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
 import mysql.connector
 from dotenv import load_dotenv
 import os
 import json
+#from models import User
+from datetime import timedelta
 load_dotenv()
+
+
 
 
 app = Flask(__name__)
@@ -15,6 +21,84 @@ db_config = {
     "password": os.getenv('DBPASS'),
     "database": os.getenv('DBNAME')
 }
+
+app.config.update(
+    SECRET_KEY=os.environ.get('FLASK_SECRET_KEY'),
+    SESSION_COOKIE_SECURE=False,  # Set to True if using HTTPS
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    PERMANENT_SESSION_LIFETIME=timedelta(minutes=60),
+    REMEMBER_COOKIE_DURATION=timedelta(days=14),
+    REMEMBER_COOKIE_SECURE=False,  # Set to True if using HTTPS
+    REMEMBER_COOKIE_HTTPONLY=True
+)
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+login_manager.login_message = 'Please log in to access this page.'
+
+def get_db_connection():
+    try:
+        conn = mysql.connector.connect(**db_config)
+        return conn
+    except mysql.connector.Error as e:
+        print(f"Database connection error: {e}")
+        return None
+
+def init_db():
+    try:
+        conn = get_db_connection()
+        if not conn:
+            print("Could not initialize database")
+            return
+            
+        cursor = conn.cursor()
+        
+        # Create users table if it doesn't exist
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(80) UNIQUE NOT NULL,
+                password_hash VARCHAR(256) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        
+    except mysql.connector.Error as e:
+        print(f"Database initialization error: {e}")
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+
+
+# Call this when your app starts
+init_db()
+
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    conn = mysql.connector.connect(**db_config)
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+    user_data = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    
+    if user_data:
+        return User(
+            id=user_data['id'],
+            username=user_data['username'],
+            password_hash=user_data['password_hash']
+        )
+    return None
+
+
+
 
 def execute_query(query):
     #Executes the SQL query and returns the result.
@@ -149,6 +233,8 @@ def compare_query_results(user_result, ref_result):
 
 
 @app.route('/', methods=['GET','POST'])
+@app.route('/index', methods=['GET','POST'])
+@login_required
 def index():
     import os
     options = read_files_from_directory(os.path.dirname(os.path.abspath(__file__)))
@@ -177,6 +263,7 @@ def index():
 
 
 @app.route('/compare', methods=['POST'])
+@login_required
 def compare():
     data = request.get_json()
     user_query = data.get('query', '')
@@ -188,6 +275,7 @@ def compare():
     return jsonify(comparison)
 
 @app.route('/get_questions', methods=['POST'])
+@login_required
 def get_questions():
     filename = request.form.get('filename')
     if not filename:
@@ -206,6 +294,7 @@ def get_questions():
 
 
 @app.route('/get_queries', methods=['POST'])
+@login_required
 def get_queries():
     selected_file = request.form.get('filename')
     if selected_file:
@@ -219,6 +308,7 @@ def get_queries():
     return jsonify({'queries': []})
 
 @app.route('/compare_files', methods=['POST'])
+@login_required
 def compare_files():
     if 'userFile' not in request.files:
         return jsonify({'error': 'User file is required'}), 400
@@ -282,6 +372,190 @@ def compare_files():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    # Debug print to verify route is being hit
+    print("Login route accessed")
+    
+    if current_user.is_authenticated:
+        print("User already authenticated, redirecting to index")
+        return redirect(url_for('index'))
+
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        print(f"Login attempt for username: {username}")  # Debug print
+        
+        user = User.get_by_username(username)
+        
+        if user:
+            print("User found in database")  # Debug print
+            if check_password_hash(user.password_hash, password):
+                print("Password verified successfully")  # Debug print
+                login_user(user)
+                
+                # Verify user was logged in
+                if current_user.is_authenticated:
+                    print("User authenticated successfully")
+                    next_page = url_for('index')#request.args.get('next')
+                    if not next_page or not next_page.startswith('/'):
+                        next_page = url_for('index')
+                    print(f"Redirecting to: {next_page}")  # Debug print
+                    return redirect(next_page)
+                else:
+                    print("User authentication failed after login_user")
+            else:
+                print("Password verification failed")
+        else:
+            print("User not found in database")
+        
+        flash('Invalid username or password')
+    return render_template('login.html')
+
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+        
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        confirm_password = request.form.get('confirm_password')
+        
+        if not username or not password or not confirm_password:
+            flash('All fields are required')
+            return render_template('register.html')
+            
+        if password != confirm_password:
+            flash('Passwords do not match')
+            return render_template('register.html')
+            
+        try:
+            conn = get_db_connection()
+            if not conn:
+                flash('Unable to connect to database')
+                return render_template('register.html')
+                
+            cursor = conn.cursor(dictionary=True)
+            
+            # Check if user exists
+            cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+            if cursor.fetchone():
+                print("Username already exists in database")
+                flash('Username already exists')
+                return render_template('register.html')
+            
+            # Create new user
+            password_hash = generate_password_hash(password, method='pbkdf2:sha256')
+            cursor.execute(
+                "INSERT INTO users (username, password_hash) VALUES (%s, %s)",
+                (username, password_hash)
+            )
+            conn.commit()
+            
+            flash('Registration successful! Please login.')
+            return redirect(url_for('login'))
+            
+        except mysql.connector.Error as e:
+            flash(f'Registration failed: {str(e)}')
+            return render_template('register.html')
+        finally:
+            if 'cursor' in locals():
+                cursor.close()
+            if 'conn' in locals():
+                conn.close()
+            
+    return render_template('register.html')
+
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
+
+@app.errorhandler(500)
+def internal_error(error):
+    return render_template('error.html', error='Internal Server Error'), 500
+
+@app.errorhandler(mysql.connector.Error)
+def handle_db_error(error):
+    return render_template('error.html', error='Database Error'), 500
+
+@app.before_request
+def log_request_info():
+    app.logger.debug('Headers: %s', request.headers)
+    app.logger.debug('Body: %s', request.get_data()) 
+def before_request():
+    if not request.is_secure and app.env != 'development':
+        url = request.url.replace('http://', 'https://', 1)
+        return redirect(url)
+
+@app.after_request
+def after_request(response):
+    # Log response status
+    print(f"Response status: {response.status_code}")
+    return response
+
+@app.route('/debug-session')
+def debug_session():
+    if app.debug:
+        return {
+            'user': current_user.is_authenticated,
+            'session': dict(session)
+        }
+    return 'Debugging disabled'
+
+class User(UserMixin):
+    def __init__(self, id, username, password_hash):
+        self.id = id
+        self.username = username
+        self.password_hash = password_hash
+
+    def get_id(self):
+        return str(self.id)  # Must return string
+
+    def is_authenticated(self):
+        return True
+
+    def is_active(self):
+        return True
+
+    def is_anonymous(self):
+        return False
+
+    @staticmethod
+    def get_by_username(username):
+        try:
+            conn = mysql.connector.connect(**db_config)
+            if not conn:
+                print("Database connection failed")
+                return None
+                
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
+            user_data = cursor.fetchone()
+            
+            if user_data:
+                print(f"User data found: {user_data}")  # Debug print
+                return User(
+                    id=user_data['id'],
+                    username=user_data['username'],
+                    password_hash=user_data['password_hash']
+                )
+            print("No user found with this username")
+            return None
+            
+        except Exception as e:
+            print(f"Error in get_by_username: {e}")
+            return None
+        finally:
+            if 'cursor' in locals():
+                cursor.close()
+            if 'conn' in locals():
+                conn.close()
 
 
 
